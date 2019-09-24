@@ -44,6 +44,16 @@ Password = ""
   Host = "localhost"
   Port = 48061
 
+  [Clients.Notifications]
+  Protocol = 'http'
+  Host = 'localhost'
+  Port = 48060
+
+  [Clients.Command]
+  Protocol = 'http'
+  Host = 'localhost'
+  Port = 48082
+
 [MessageBus]
 Type = 'zero'
     [MessageBus.PublishHost]
@@ -65,4 +75,6 @@ PublishTopic="converted"
 
 [ApplicationSettings]
 ApplicationName = "advanced-filter-convert-publish"
-ValueDescriptors = "RandomValue_Float32, RandomValue_Float64"
+ValueDescriptors = "RandomValue_Float32, RandomValue_Float64, RandomValue_Int32"
+CommandDevice = "Random-Integer-Device"
+CommandName = "RandomValue_Int32"

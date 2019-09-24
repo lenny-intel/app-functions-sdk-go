@@ -41,7 +41,7 @@ func ConvertToReadableFloatValues(edgexcontext *appcontext.Context, params ...in
 	event := params[0].(models.Event)
 	for index := range event.Readings {
 		eventReading := &event.Readings[index]
-		edgexcontext.LoggingClient.Debug(fmt.Sprintf("Event Reading for %s: %s is '%s'", event.Device, eventReading.Name, eventReading.Value))
+		edgexcontext.LoggingClient.Info(fmt.Sprintf("Event Reading for %s: %s is '%s'", event.Device, eventReading.Name, eventReading.Value))
 
 		data, err := base64.StdEncoding.DecodeString(eventReading.Value)
 		if err != nil {
@@ -68,7 +68,7 @@ func ConvertToReadableFloatValues(edgexcontext *appcontext.Context, params ...in
 			eventReading.Value = strconv.FormatFloat(value, 'f', precision, 64)
 		}
 
-		edgexcontext.LoggingClient.Debug(fmt.Sprintf("Converted Event Reading for %s: %s is '%s'", event.Device, eventReading.Name, eventReading.Value))
+		edgexcontext.LoggingClient.Info(fmt.Sprintf("Converted Event Reading for %s: %s is '%s'", event.Device, eventReading.Name, eventReading.Value))
 	}
 
 	return true, event

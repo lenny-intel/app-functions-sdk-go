@@ -70,6 +70,8 @@ func main() {
 	// execute every time an event is triggered.
 	err := edgexSdk.SetFunctionsPipeline(
 		transforms.NewFilter(valueDescriptors).FilterByValueDescriptor,
+		functions.SendInt32Command,
+		functions.SetPrecision,
 		functions.ConvertToReadableFloatValues,
 		functions.PrintFloatValuesToConsole,
 		functions.Publish,
