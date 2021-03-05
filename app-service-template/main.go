@@ -20,6 +20,8 @@ package main
 import (
 	"os"
 
+	"github.com/pelletier/go-toml"
+
 	"github.com/edgexfoundry/app-functions-sdk-go/v2/appsdk"
 	"github.com/edgexfoundry/app-functions-sdk-go/v2/pkg/transforms"
 
@@ -30,15 +32,29 @@ const (
 	serviceKey = "new-app-service"
 )
 
+type MyCustom struct {
+	MyInt int
+}
+type Custom struct {
+	AppCustom MyCustom
+}
+
+func (c *Custom) MarshalTOML() ([]byte, error) {
+	return toml.Marshal(c)
+}
+
 func main() {
 	// TODO: See https://docs.edgexfoundry.org/1.3/microservices/application/ApplicationServices/
 	//       for documentation on application services.
 
-	edgexSdk := &appsdk.AppFunctionsSDK{ServiceKey: serviceKey}
+	custom := &Custom{}
+	edgexSdk := &appsdk.AppFunctionsSDK{ServiceKey: serviceKey, CustomConfig: custom}
 	if err := edgexSdk.Initialize(); err != nil {
 		edgexSdk.LoggingClient.Errorf("SDK initialization failed: %s", err.Error())
 		os.Exit(-1)
 	}
+
+	edgexSdk.LoggingClient.Infof("Myint from custom config is '%d'", custom.AppCustom.MyInt)
 
 	// TODO: Replace with retrieving your custom ApplicationSettings from configuration
 	deviceNames, err := edgexSdk.GetAppSettingStrings("DeviceNames")

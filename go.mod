@@ -17,3 +17,7 @@ require (
 	github.com/stretchr/objx v0.2.0 // indirect
 	github.com/stretchr/testify v1.7.0
 )
+
+replace (
+	github.com/edgexfoundry/go-mod-bootstrap/v2 => ../MODS/go-mod-bootstrap
+)

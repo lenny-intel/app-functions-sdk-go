@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	nethttp "net/http"
 	"os"
 	"os/signal"
@@ -27,6 +28,9 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+
+	"github.com/edgexfoundry/go-mod-configuration/v2/configuration"
+	"github.com/pelletier/go-toml"
 
 	"github.com/edgexfoundry/app-functions-sdk-go/v2/appcontext"
 	"github.com/edgexfoundry/app-functions-sdk-go/v2/internal"
@@ -100,6 +104,7 @@ type AppFunctionsSDK struct {
 	EdgexClients common.EdgeXClients
 	// RegistryClient is the client used by service to communicate with service registry.
 	RegistryClient            registry.Client
+	ConfigClient              configuration.Client
 	transforms                []appcontext.AppFunction
 	skipVersionCheck          bool
 	usingConfigurablePipeline bool
@@ -107,6 +112,7 @@ type AppFunctionsSDK struct {
 	runtime                   *runtime.GolangRuntime
 	webserver                 *webserver.WebServer
 	config                    *common.ConfigurationStruct
+	CustomConfig              interface{}
 	storeClient               interfaces.StoreClient
 	secretProvider            bootstrapInterfaces.SecretProvider
 	storeForwardWg            *sync.WaitGroup
@@ -391,6 +397,7 @@ func (sdk *AppFunctionsSDK) Initialize() error {
 	sdk.LoggingClient.Info(fmt.Sprintf("Starting %s %s ", sdk.ServiceKey, internal.ApplicationVersion))
 
 	sdk.config = &common.ConfigurationStruct{}
+
 	dic := di.NewContainer(di.ServiceConstructorMap{
 		container.ConfigurationName: func(get di.Get) interface{} {
 			return sdk.config
@@ -428,6 +435,33 @@ func (sdk *AppFunctionsSDK) Initialize() error {
 
 	if !successful {
 		return fmt.Errorf("boostrapping failed")
+	}
+
+	if sdk.CustomConfig != nil {
+		contents, err := ioutil.ReadFile("./res/configuration.toml")
+		if err != nil {
+			return fmt.Errorf("Failed to load custom configuration: %s", err.Error())
+		}
+
+		err = toml.Unmarshal(contents, sdk.CustomConfig)
+		if err != nil {
+			return fmt.Errorf("Still unable to unmarshel custom toml config: %s", err.Error())
+
+		}
+
+		sdk.LoggingClient.Infof("Custom config is: %v", sdk.CustomConfig)
+
+		configClient := bootstrapContainer.ConfigClientFrom(dic.Get)
+		sdk.LoggingClient.Infof("using config client is %v", configClient != nil)
+		if configClient != nil {
+			err = configClient.PutConfiguration(reflect.ValueOf(sdk.CustomConfig).Elem().Interface(), true)
+			if err != nil {
+				return fmt.Errorf("error pushing custom config to Consul: %s", err.Error())
+			}
+
+			sdk.LoggingClient.Info("Config pushed to Consul")
+
+		}
 	}
 
 	// Bootstrapping is complete, so now need to retrieve the needed objects from the containers.
