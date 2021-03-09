@@ -20,7 +20,7 @@ package main
 import (
 	"os"
 
-	"github.com/edgexfoundry/app-functions-sdk-go/v2/appsdk"
+	"github.com/edgexfoundry/app-functions-sdk-go/v2/pkg"
 	"github.com/edgexfoundry/app-functions-sdk-go/v2/pkg/transforms"
 
 	"new-app-service/functions"
@@ -34,34 +34,35 @@ func main() {
 	// TODO: See https://docs.edgexfoundry.org/1.3/microservices/application/ApplicationServices/
 	//       for documentation on application services.
 
-	edgexSdk := &appsdk.AppFunctionsSDK{ServiceKey: serviceKey}
-	if err := edgexSdk.Initialize(); err != nil {
-		edgexSdk.LoggingClient.Errorf("SDK initialization failed: %s", err.Error())
+	service, ok := pkg.NewAppService(serviceKey)
+	if !ok {
 		os.Exit(-1)
 	}
 
+	lc := service.LoggingClient()
+
 	// TODO: Replace with retrieving your custom ApplicationSettings from configuration
-	deviceNames, err := edgexSdk.GetAppSettingStrings("DeviceNames")
+	deviceNames, err := service.GetAppSettingStrings("DeviceNames")
 	if err != nil {
-		edgexSdk.LoggingClient.Errorf("failed to retrieve DeviceNames from configuration: %s", err.Error())
+		lc.Errorf("failed to retrieve DeviceNames from configuration: %s", err.Error())
 		os.Exit(-1)
 	}
 
 	// TODO: Replace below functions with built in and/or your custom functions for your use case.
 	//       See https://docs.edgexfoundry.org/1.3/microservices/application/BuiltIn/ for list of built-in functions
 	sample := functions.NewSample()
-	err = edgexSdk.SetFunctionsPipeline(
+	err = service.SetFunctionsPipeline(
 		transforms.NewFilterFor(deviceNames).FilterByDeviceName,
 		sample.LogEventDetails,
 		sample.ConvertEventToXML,
 		sample.OutputXML)
 	if err != nil {
-		edgexSdk.LoggingClient.Errorf("SetFunctionsPipeline returned error: %s", err.Error())
+		lc.Errorf("SetFunctionsPipeline returned error: %s", err.Error())
 		os.Exit(-1)
 	}
 
-	if err := edgexSdk.MakeItRun(); err != nil {
-		edgexSdk.LoggingClient.Errorf("MakeItRun returned error: %s", err.Error())
+	if err := service.MakeItRun(); err != nil {
+		lc.Errorf("MakeItRun returned error: %s", err.Error())
 		os.Exit(-1)
 	}
 

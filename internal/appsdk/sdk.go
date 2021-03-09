@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2020 Intel Corporation
+// Copyright (c) 2021 Intel Corporation
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,14 +28,19 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/edgexfoundry/app-functions-sdk-go/v2/appcontext"
+	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/secret"
+	"github.com/edgexfoundry/go-mod-core-contracts/v2/clients/command"
+	"github.com/edgexfoundry/go-mod-core-contracts/v2/clients/coredata"
+	"github.com/edgexfoundry/go-mod-core-contracts/v2/clients/notifications"
+	"github.com/edgexfoundry/go-mod-registry/v2/registry"
+
 	"github.com/edgexfoundry/app-functions-sdk-go/v2/internal"
 	"github.com/edgexfoundry/app-functions-sdk-go/v2/internal/bootstrap/container"
 	"github.com/edgexfoundry/app-functions-sdk-go/v2/internal/bootstrap/handlers"
 	"github.com/edgexfoundry/app-functions-sdk-go/v2/internal/common"
 	"github.com/edgexfoundry/app-functions-sdk-go/v2/internal/runtime"
-	"github.com/edgexfoundry/app-functions-sdk-go/v2/internal/store/db/interfaces"
 	"github.com/edgexfoundry/app-functions-sdk-go/v2/internal/webserver"
+	"github.com/edgexfoundry/app-functions-sdk-go/v2/pkg/interfaces"
 	"github.com/edgexfoundry/app-functions-sdk-go/v2/pkg/util"
 
 	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap"
@@ -44,25 +49,20 @@ import (
 	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/flags"
 	bootstrapHandlers "github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/handlers"
 	bootstrapInterfaces "github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/interfaces"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/secret"
 	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/startup"
 	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
-	"github.com/edgexfoundry/go-mod-messaging/v2/messaging"
-	"github.com/edgexfoundry/go-mod-messaging/v2/pkg/types"
-	"github.com/edgexfoundry/go-mod-registry/v2/registry"
-
 	"github.com/edgexfoundry/go-mod-core-contracts/v2/clients"
 	"github.com/edgexfoundry/go-mod-core-contracts/v2/clients/logger"
 	"github.com/edgexfoundry/go-mod-core-contracts/v2/models"
-
+	"github.com/edgexfoundry/go-mod-messaging/v2/messaging"
+	"github.com/edgexfoundry/go-mod-messaging/v2/pkg/types"
 	"github.com/gorilla/mux"
 )
 
 const (
 	// ProfileSuffixPlaceholder is used to create unique names for profiles
-	ProfileSuffixPlaceholder = "<profile>"
-	envProfile               = "EDGEX_PROFILE"
-	envServiceKey            = "EDGEX_SERVICE_KEY"
+	envProfile    = "EDGEX_PROFILE"
+	envServiceKey = "EDGEX_SERVICE_KEY"
 
 	TriggerTypeMessageBus = "EDGEX-MESSAGEBUS"
 	TriggerTypeMQTT       = "EXTERNAL-MQTT"
@@ -80,45 +80,48 @@ type key int
 // different integer values.
 const SDKKey key = 0
 
+func NewSDK(serviceKey string, targetType interface{}, profileSuffixPlaceholder string) *AppFunctionsSDK {
+	return &AppFunctionsSDK{
+		serviceKey:               serviceKey,
+		targetType:               targetType,
+		profileSuffixPlaceholder: profileSuffixPlaceholder,
+	}
+}
+
+type commandLineFlags struct {
+	skipVersionCheck   bool
+	serviceKeyOverride string
+}
+
+type contextGroup struct {
+	storeForwardWg        *sync.WaitGroup
+	storeForwardCancelCtx context.CancelFunc
+	appWg                 *sync.WaitGroup
+	appCtx                context.Context
+	appCancelCtx          context.CancelFunc
+	stop                  context.CancelFunc
+}
+
 // AppFunctionsSDK provides the necessary struct to create an instance of the Application Functions SDK. Be sure and provide a ServiceKey
 // when creating an instance of the SDK. After creating an instance, you'll first want to call .Initialize(), to start up the SDK. Secondly,
 // provide the desired transforms for your pipeline by calling .SetFunctionsPipeline(). Lastly, call .MakeItRun() to start listening for events based on
 // your configured trigger.
 type AppFunctionsSDK struct {
-	// ServiceKey is the application services' key used for Configuration and Registration when the Registry is enabled
-	ServiceKey string
-	// LoggingClient is the EdgeX logger client used to log messages
-	LoggingClient logger.LoggingClient
-	// TargetType is the expected type of the incoming data. Must be set to a pointer to an instance of the type.
-	// Defaults to &models.Event{} if nil. The income data is un-marshaled (JSON or CBOR) in to the type,
-	// except when &[]byte{} is specified. In this case the []byte data is pass to the first function in the Pipeline.
-	TargetType interface{}
-	// EdgexClients allows access to the EdgeX clients such as the CommandClient.
-	// Note that the individual clients (e.g EdgexClients.CommandClient) may be nil if the Service (Command) is not configured
-	// in the [Clients] section of the App Service's configuration.
-	// It is highly recommend that the clients are verified to not be nil before use.
-	EdgexClients common.EdgeXClients
-	// RegistryClient is the client used by service to communicate with service registry.
-	RegistryClient            registry.Client
-	transforms                []appcontext.AppFunction
-	skipVersionCheck          bool
+	dic                       *di.Container
+	serviceKey                string
+	targetType                interface{}
+	config                    *common.ConfigurationStruct
+	lc                        logger.LoggingClient
+	transforms                []interfaces.AppFunction
 	usingConfigurablePipeline bool
-	httpErrors                chan error
 	runtime                   *runtime.GolangRuntime
 	webserver                 *webserver.WebServer
-	config                    *common.ConfigurationStruct
-	storeClient               interfaces.StoreClient
-	secretProvider            bootstrapInterfaces.SecretProvider
-	storeForwardWg            *sync.WaitGroup
-	storeForwardCancelCtx     context.CancelFunc
-	appWg                     *sync.WaitGroup
-	appCtx                    context.Context
-	appCancelCtx              context.CancelFunc
+	ctx                       contextGroup
 	deferredFunctions         []bootstrap.Deferred
-	serviceKeyOverride        string
-	backgroundChannel         <-chan types.MessageEnvelope
-	customTriggerFactories    map[string]func(sdk *AppFunctionsSDK) (Trigger, error)
-	stop                      context.CancelFunc
+	backgroundPublishChannel  <-chan types.MessageEnvelope
+	customTriggerFactories    map[string]func(sdk *AppFunctionsSDK) (interfaces.Trigger, error)
+	profileSuffixPlaceholder  string
+	commandLine               commandLineFlags
 }
 
 // AddRoute allows you to leverage the existing webserver to add routes.
@@ -135,18 +138,18 @@ func (sdk *AppFunctionsSDK) AddRoute(route string, handler func(nethttp.Response
 
 // AddBackgroundPublisher will create a channel of provided capacity to be
 // consumed by the MessageBus output and return a publisher that writes to it
-func (sdk *AppFunctionsSDK) AddBackgroundPublisher(capacity int) BackgroundPublisher {
+func (sdk *AppFunctionsSDK) AddBackgroundPublisher(capacity int) interfaces.BackgroundPublisher {
 	bgchan, pub := newBackgroundPublisher(capacity)
-	sdk.backgroundChannel = bgchan
+	sdk.backgroundPublishChannel = bgchan
 	return pub
 }
 
 // MakeItStop will force the service loop to exit in the same fashion as SIGINT/SIGTERM received from the OS
 func (sdk *AppFunctionsSDK) MakeItStop() {
-	if sdk.stop != nil {
-		sdk.stop()
+	if sdk.ctx.stop != nil {
+		sdk.ctx.stop()
 	} else {
-		sdk.LoggingClient.Warn("MakeItStop called but no stop handler set on SDK - is the service running?")
+		sdk.lc.Warn("MakeItStop called but no stop handler set on SDK - is the service running?")
 	}
 }
 
@@ -156,17 +159,14 @@ func (sdk *AppFunctionsSDK) MakeItStop() {
 func (sdk *AppFunctionsSDK) MakeItRun() error {
 	runCtx, stop := context.WithCancel(context.Background())
 
-	sdk.stop = stop
-
-	httpErrors := make(chan error)
-	defer close(httpErrors)
+	sdk.ctx.stop = stop
 
 	sdk.runtime = &runtime.GolangRuntime{
-		TargetType: sdk.TargetType,
-		ServiceKey: sdk.ServiceKey,
+		TargetType: sdk.targetType,
+		ServiceKey: sdk.serviceKey,
 	}
 
-	sdk.runtime.Initialize(sdk.storeClient, sdk.secretProvider)
+	sdk.runtime.Initialize(sdk.dic)
 	sdk.runtime.SetTransforms(sdk.transforms)
 
 	// determine input type and create trigger for it
@@ -176,9 +176,9 @@ func (sdk *AppFunctionsSDK) MakeItRun() error {
 	}
 
 	// Initialize the trigger (i.e. start a web server, or connect to message bus)
-	deferred, err := t.Initialize(sdk.appWg, sdk.appCtx, sdk.backgroundChannel)
+	deferred, err := t.Initialize(sdk.ctx.appWg, sdk.ctx.appCtx, sdk.backgroundPublishChannel)
 	if err != nil {
-		sdk.LoggingClient.Error(err.Error())
+		sdk.lc.Error(err.Error())
 		return errors.New("Failed to initialize Trigger")
 	}
 
@@ -188,37 +188,40 @@ func (sdk *AppFunctionsSDK) MakeItRun() error {
 	if sdk.config.Writable.StoreAndForward.Enabled {
 		sdk.startStoreForward()
 	} else {
-		sdk.LoggingClient.Info("StoreAndForward disabled. Not running retry loop.")
+		sdk.lc.Info("StoreAndForward disabled. Not running retry loop.")
 	}
 
-	sdk.LoggingClient.Info(sdk.config.Service.StartupMsg)
+	sdk.lc.Info(sdk.config.Service.StartupMsg)
 
 	signals := make(chan os.Signal)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 
-	sdk.webserver.StartWebServer(sdk.httpErrors)
+	httpErrors := make(chan error)
+	defer close(httpErrors)
+
+	sdk.webserver.StartWebServer(httpErrors)
 
 	select {
-	case httpError := <-sdk.httpErrors:
-		sdk.LoggingClient.Info("Http error received: ", httpError.Error())
+	case httpError := <-httpErrors:
+		sdk.lc.Info("Http error received: ", httpError.Error())
 		err = httpError
 
 	case signalReceived := <-signals:
-		sdk.LoggingClient.Info("Terminating signal received: " + signalReceived.String())
+		sdk.lc.Info("Terminating signal received: " + signalReceived.String())
 
 	case <-runCtx.Done():
-		sdk.LoggingClient.Info("Terminating: sdk.MakeItStop called")
+		sdk.lc.Info("Terminating: sdk.MakeItStop called")
 	}
 
-	sdk.stop = nil
+	sdk.ctx.stop = nil
 
 	if sdk.config.Writable.StoreAndForward.Enabled {
-		sdk.storeForwardCancelCtx()
-		sdk.storeForwardWg.Wait()
+		sdk.ctx.storeForwardCancelCtx()
+		sdk.ctx.storeForwardWg.Wait()
 	}
 
-	sdk.appCancelCtx() // Cancel all long running go funcs
-	sdk.appWg.Wait()
+	sdk.ctx.appCancelCtx() // Cancel all long running go funcs
+	sdk.ctx.appWg.Wait()
 	// Call all the deferred funcs that need to happen when exiting.
 	// These are things like un-register from the Registry, disconnect from the Message Bus, etc
 	for _, deferredFunc := range sdk.deferredFunctions {
@@ -229,15 +232,15 @@ func (sdk *AppFunctionsSDK) MakeItRun() error {
 }
 
 // LoadConfigurablePipeline ...
-func (sdk *AppFunctionsSDK) LoadConfigurablePipeline() ([]appcontext.AppFunction, error) {
-	var pipeline []appcontext.AppFunction
+func (sdk *AppFunctionsSDK) LoadConfigurablePipeline() ([]interfaces.AppFunction, error) {
+	var pipeline []interfaces.AppFunction
 
 	sdk.usingConfigurablePipeline = true
 
-	sdk.TargetType = nil
+	sdk.targetType = nil
 
 	if sdk.config.Writable.Pipeline.UseTargetTypeOfByteArray {
-		sdk.TargetType = &[]byte{}
+		sdk.targetType = &[]byte{}
 	}
 
 	configurable := AppFunctionsSDKConfigurable{
@@ -251,7 +254,7 @@ func (sdk *AppFunctionsSDK) LoadConfigurablePipeline() ([]appcontext.AppFunction
 		return nil, errors.New(
 			"execution Order has 0 functions specified. You must have a least one function in the pipeline")
 	}
-	sdk.LoggingClient.Debugf("Function Pipeline Execution Order: [%s]", pipelineConfig.ExecutionOrder)
+	sdk.lc.Debugf("Function Pipeline Execution Order: [%s]", pipelineConfig.ExecutionOrder)
 
 	for _, functionName := range executionOrder {
 		functionName = strings.TrimSpace(functionName)
@@ -291,7 +294,7 @@ func (sdk *AppFunctionsSDK) LoadConfigurablePipeline() ([]appcontext.AppFunction
 			}
 		}
 
-		function, ok := result.Call(inputParameters)[0].Interface().(appcontext.AppFunction)
+		function, ok := result.Call(inputParameters)[0].Interface().(interfaces.AppFunction)
 		if !ok {
 			return nil, fmt.Errorf("failed to cast function %s as AppFunction type", functionName)
 		}
@@ -301,7 +304,7 @@ func (sdk *AppFunctionsSDK) LoadConfigurablePipeline() ([]appcontext.AppFunction
 		}
 
 		pipeline = append(pipeline, function)
-		configurable.Sdk.LoggingClient.Debugf(
+		sdk.lc.Debugf(
 			"%s function added to configurable pipeline with parameters: [%s]",
 			functionName,
 			listParameters(configuration.Parameters))
@@ -310,25 +313,9 @@ func (sdk *AppFunctionsSDK) LoadConfigurablePipeline() ([]appcontext.AppFunction
 	return pipeline, nil
 }
 
-func listParameters(parameters map[string]string) string {
-	result := ""
-	first := true
-	for key, value := range parameters {
-		if first {
-			result = fmt.Sprintf("%s='%s'", key, value)
-			first = false
-			continue
-		}
-
-		result += fmt.Sprintf(", %s='%s'", key, value)
-	}
-
-	return result
-}
-
 // SetFunctionsPipeline allows you to define each function to execute and the order in which each function
 // will be called as each event comes in.
-func (sdk *AppFunctionsSDK) SetFunctionsPipeline(transforms ...appcontext.AppFunction) error {
+func (sdk *AppFunctionsSDK) SetFunctionsPipeline(transforms ...interfaces.AppFunction) error {
 	if len(transforms) == 0 {
 		return errors.New("no transforms provided to pipeline")
 	}
@@ -337,7 +324,7 @@ func (sdk *AppFunctionsSDK) SetFunctionsPipeline(transforms ...appcontext.AppFun
 
 	if sdk.runtime != nil {
 		sdk.runtime.SetTransforms(transforms)
-		sdk.runtime.TargetType = sdk.TargetType
+		sdk.runtime.TargetType = sdk.targetType
 	}
 
 	return nil
@@ -367,7 +354,7 @@ func (sdk *AppFunctionsSDK) GetAppSettingStrings(setting string) ([]string, erro
 // Initialize will parse command line flags, register for interrupts,
 // initialize the logging system, and ingest configuration.
 func (sdk *AppFunctionsSDK) Initialize() error {
-	startupTimer := startup.NewStartUpTimer(sdk.ServiceKey)
+	startupTimer := startup.NewStartUpTimer(sdk.serviceKey)
 
 	additionalUsage :=
 		"    -s/--skipVersionCheck           Indicates the service should skip the Core Service's version compatibility check.\n" +
@@ -376,50 +363,50 @@ func (sdk *AppFunctionsSDK) Initialize() error {
 			"                                    the name of the profile used."
 
 	sdkFlags := flags.NewWithUsage(additionalUsage)
-	sdkFlags.FlagSet.BoolVar(&sdk.skipVersionCheck, "skipVersionCheck", false, "")
-	sdkFlags.FlagSet.BoolVar(&sdk.skipVersionCheck, "s", false, "")
-	sdkFlags.FlagSet.StringVar(&sdk.serviceKeyOverride, "serviceKey", "", "")
-	sdkFlags.FlagSet.StringVar(&sdk.serviceKeyOverride, "sk", "", "")
+	sdkFlags.FlagSet.BoolVar(&sdk.commandLine.skipVersionCheck, "skipVersionCheck", false, "")
+	sdkFlags.FlagSet.BoolVar(&sdk.commandLine.skipVersionCheck, "s", false, "")
+	sdkFlags.FlagSet.StringVar(&sdk.commandLine.serviceKeyOverride, "serviceKey", "", "")
+	sdkFlags.FlagSet.StringVar(&sdk.commandLine.serviceKeyOverride, "sk", "", "")
 
 	sdkFlags.Parse(os.Args[1:])
 
 	// Temporarily setup logging to STDOUT so the client can be used before bootstrapping is completed
-	sdk.LoggingClient = logger.NewClient(sdk.ServiceKey, models.InfoLog)
+	sdk.lc = logger.NewClient(sdk.serviceKey, models.InfoLog)
 
 	sdk.setServiceKey(sdkFlags.Profile())
 
-	sdk.LoggingClient.Info(fmt.Sprintf("Starting %s %s ", sdk.ServiceKey, internal.ApplicationVersion))
+	sdk.lc.Info(fmt.Sprintf("Starting %s %s ", sdk.serviceKey, internal.ApplicationVersion))
 
 	sdk.config = &common.ConfigurationStruct{}
-	dic := di.NewContainer(di.ServiceConstructorMap{
+	sdk.dic = di.NewContainer(di.ServiceConstructorMap{
 		container.ConfigurationName: func(get di.Get) interface{} {
 			return sdk.config
 		},
 	})
 
-	sdk.appCtx, sdk.appCancelCtx = context.WithCancel(context.Background())
-	sdk.appWg = &sync.WaitGroup{}
+	sdk.ctx.appCtx, sdk.ctx.appCancelCtx = context.WithCancel(context.Background())
+	sdk.ctx.appWg = &sync.WaitGroup{}
 
 	var deferred bootstrap.Deferred
 	var successful bool
 	var configUpdated config.UpdatedStream = make(chan struct{})
 
-	sdk.appWg, deferred, successful = bootstrap.RunAndReturnWaitGroup(
-		sdk.appCtx,
-		sdk.appCancelCtx,
+	sdk.ctx.appWg, deferred, successful = bootstrap.RunAndReturnWaitGroup(
+		sdk.ctx.appCtx,
+		sdk.ctx.appCancelCtx,
 		sdkFlags,
-		sdk.ServiceKey,
+		sdk.serviceKey,
 		internal.ConfigRegistryStem,
 		sdk.config,
 		configUpdated,
 		startupTimer,
-		dic,
+		sdk.dic,
 		[]bootstrapInterfaces.BootstrapHandler{
 			bootstrapHandlers.SecureProviderBootstrapHandler,
 			handlers.NewDatabase().BootstrapHandler,
 			handlers.NewClients().BootstrapHandler,
 			handlers.NewTelemetry().BootstrapHandler,
-			handlers.NewVersionValidator(sdk.skipVersionCheck, internal.SDKVersion).BootstrapHandler,
+			handlers.NewVersionValidator(sdk.commandLine.skipVersionCheck, internal.SDKVersion).BootstrapHandler,
 		},
 	)
 
@@ -431,15 +418,7 @@ func (sdk *AppFunctionsSDK) Initialize() error {
 	}
 
 	// Bootstrapping is complete, so now need to retrieve the needed objects from the containers.
-	sdk.secretProvider = bootstrapContainer.SecretProviderFrom(dic.Get)
-	sdk.storeClient = container.StoreClientFrom(dic.Get)
-	sdk.LoggingClient = bootstrapContainer.LoggingClientFrom(dic.Get)
-	sdk.RegistryClient = bootstrapContainer.RegistryFrom(dic.Get)
-	sdk.EdgexClients.LoggingClient = sdk.LoggingClient
-	sdk.EdgexClients.EventClient = container.EventClientFrom(dic.Get)
-	sdk.EdgexClients.ValueDescriptorClient = container.ValueDescriptorClientFrom(dic.Get)
-	sdk.EdgexClients.NotificationsClient = container.NotificationsClientFrom(dic.Get)
-	sdk.EdgexClients.CommandClient = container.CommandClientFrom(dic.Get)
+	sdk.lc = bootstrapContainer.LoggingClientFrom(sdk.dic.Get)
 
 	// If using the RedisStreams MessageBus implementation then need to make sure the
 	// password for the Redis DB is set in the MessageBus Optional properties.
@@ -447,7 +426,8 @@ func (sdk *AppFunctionsSDK) Initialize() error {
 	if triggerType == TriggerTypeMessageBus &&
 		sdk.config.Trigger.EdgexMessageBus.Type == messaging.RedisStreams {
 
-		credentials, err := sdk.secretProvider.GetSecrets(sdk.config.Database.Type)
+		secretProvider := bootstrapContainer.SecretProviderFrom(sdk.dic.Get)
+		credentials, err := secretProvider.GetSecrets(sdk.config.Database.Type)
 		if err != nil {
 			return fmt.Errorf("unable to set RedisStreams password from DB credentials")
 		}
@@ -458,30 +438,60 @@ func (sdk *AppFunctionsSDK) Initialize() error {
 	// to wait to be signaled when the configuration has been updated and then process the changes
 	NewConfigUpdateProcessor(sdk).WaitForConfigUpdates(configUpdated)
 
-	sdk.webserver = webserver.NewWebServer(sdk.config, sdk.secretProvider, sdk.LoggingClient, mux.NewRouter())
+	sdk.webserver = webserver.NewWebServer(sdk.dic, mux.NewRouter())
 	sdk.webserver.ConfigureStandardRoutes()
 
-	sdk.LoggingClient.Info("Service started in: " + startupTimer.SinceAsString())
+	sdk.lc.Info("Service started in: " + startupTimer.SinceAsString())
 
 	return nil
 }
 
-// GetSecrets retrieves secrets from a secret store.
-// path specifies the type or location of the secrets to retrieve. If specified it is appended
-// to the base path from the SecretConfig
-// keys specifies the secrets which to retrieve. If no keys are provided then all the keys associated with the
-// specified path will be returned.
-func (sdk *AppFunctionsSDK) GetSecrets(path string, keys ...string) (map[string]string, error) {
-	return sdk.secretProvider.GetSecrets(path, keys...)
+// GetSecret retrieves secret data from the secret store at the specified path.
+func (sdk *AppFunctionsSDK) GetSecret(path string, keys ...string) (map[string]string, error) {
+	secretProvider := bootstrapContainer.SecretProviderFrom(sdk.dic.Get)
+	return secretProvider.GetSecrets(path, keys...)
 }
 
-// StoreSecrets stores the secrets to a secret store.
-// it sets the values requested at provided keys
-// path specifies the type or location of the secrets to store. If specified it is appended
-// to the base path from the SecretConfig
-// secrets map specifies the "key": "value" pairs of secrets to store
-func (sdk *AppFunctionsSDK) StoreSecrets(path string, secrets map[string]string) error {
-	return sdk.secretProvider.StoreSecrets(path, secrets)
+// StoreSecret stores the secret data to a secret store at the specified path.
+func (sdk *AppFunctionsSDK) StoreSecret(path string, secretData map[string]string) error {
+	secretProvider := bootstrapContainer.SecretProviderFrom(sdk.dic.Get)
+	return secretProvider.StoreSecrets(path, secretData)
+}
+
+func (sdk *AppFunctionsSDK) LoggingClient() logger.LoggingClient {
+	return sdk.lc
+}
+
+func (sdk *AppFunctionsSDK) RegistryClient() registry.Client {
+	return bootstrapContainer.RegistryFrom(sdk.dic.Get)
+}
+
+func (sdk *AppFunctionsSDK) EventClient() coredata.EventClient {
+	return container.EventClientFrom(sdk.dic.Get)
+}
+
+func (sdk *AppFunctionsSDK) CommandClient() command.CommandClient {
+	return container.CommandClientFrom(sdk.dic.Get)
+}
+
+func (sdk *AppFunctionsSDK) NotificationsClient() notifications.NotificationsClient {
+	return container.NotificationsClientFrom(sdk.dic.Get)
+}
+
+func listParameters(parameters map[string]string) string {
+	result := ""
+	first := true
+	for key, value := range parameters {
+		if first {
+			result = fmt.Sprintf("%s='%s'", key, value)
+			first = false
+			continue
+		}
+
+		result += fmt.Sprintf(", %s='%s'", key, value)
+	}
+
+	return result
 }
 
 func (sdk *AppFunctionsSDK) addContext(next func(nethttp.ResponseWriter, *nethttp.Request)) func(nethttp.ResponseWriter, *nethttp.Request) {
@@ -502,19 +512,19 @@ func (sdk *AppFunctionsSDK) addDeferred(deferred bootstrap.Deferred) {
 func (sdk *AppFunctionsSDK) setServiceKey(profile string) {
 	envValue := os.Getenv(envServiceKey)
 	if len(envValue) > 0 {
-		sdk.serviceKeyOverride = envValue
-		sdk.LoggingClient.Info(
+		sdk.commandLine.serviceKeyOverride = envValue
+		sdk.lc.Info(
 			fmt.Sprintf("Environment profileOverride of '-n/--serviceName' by environment variable: %s=%s",
 				envServiceKey,
 				envValue))
 	}
 
 	// serviceKeyOverride may have been set by the -n/--serviceName command-line option and not the environment variable
-	if len(sdk.serviceKeyOverride) > 0 {
-		sdk.ServiceKey = sdk.serviceKeyOverride
+	if len(sdk.commandLine.serviceKeyOverride) > 0 {
+		sdk.serviceKey = sdk.commandLine.serviceKeyOverride
 	}
 
-	if !strings.Contains(sdk.ServiceKey, ProfileSuffixPlaceholder) {
+	if !strings.Contains(sdk.serviceKey, sdk.profileSuffixPlaceholder) {
 		// No placeholder, so nothing to do here
 		return
 	}
@@ -526,10 +536,10 @@ func (sdk *AppFunctionsSDK) setServiceKey(profile string) {
 	}
 
 	if len(profile) > 0 {
-		sdk.ServiceKey = strings.Replace(sdk.ServiceKey, ProfileSuffixPlaceholder, profile, 1)
+		sdk.serviceKey = strings.Replace(sdk.serviceKey, sdk.profileSuffixPlaceholder, profile, 1)
 		return
 	}
 
 	// No profile specified so remove the placeholder text
-	sdk.ServiceKey = strings.Replace(sdk.ServiceKey, ProfileSuffixPlaceholder, "", 1)
+	sdk.serviceKey = strings.Replace(sdk.serviceKey, sdk.profileSuffixPlaceholder, "", 1)
 }

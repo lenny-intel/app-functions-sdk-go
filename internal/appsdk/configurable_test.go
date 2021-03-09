@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2020 Intel Corporation
+// Copyright (c) 2021 Intel Corporation
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ import (
 func TestFilterByProfileName(t *testing.T) {
 	configurable := AppFunctionsSDKConfigurable{
 		Sdk: &AppFunctionsSDK{
-			LoggingClient: lc,
+			lc: lc,
 		},
 	}
 
@@ -56,7 +56,7 @@ func TestFilterByProfileName(t *testing.T) {
 func TestFilterByDeviceName(t *testing.T) {
 	configurable := AppFunctionsSDKConfigurable{
 		Sdk: &AppFunctionsSDK{
-			LoggingClient: lc,
+			lc: lc,
 		},
 	}
 
@@ -86,7 +86,7 @@ func TestFilterByDeviceName(t *testing.T) {
 func TestFilterBySourceName(t *testing.T) {
 	configurable := AppFunctionsSDKConfigurable{
 		Sdk: &AppFunctionsSDK{
-			LoggingClient: lc,
+			lc: lc,
 		},
 	}
 
@@ -116,7 +116,7 @@ func TestFilterBySourceName(t *testing.T) {
 func TestFilterByResourceName(t *testing.T) {
 	configurable := AppFunctionsSDKConfigurable{
 		Sdk: &AppFunctionsSDK{
-			LoggingClient: lc,
+			lc: lc,
 		},
 	}
 
@@ -146,7 +146,7 @@ func TestFilterByResourceName(t *testing.T) {
 func TestTransform(t *testing.T) {
 	configurable := AppFunctionsSDKConfigurable{
 		Sdk: &AppFunctionsSDK{
-			LoggingClient: lc,
+			lc: lc,
 		},
 	}
 
@@ -173,7 +173,7 @@ func TestTransform(t *testing.T) {
 func TestHTTPExport(t *testing.T) {
 	configurable := AppFunctionsSDKConfigurable{
 		Sdk: &AppFunctionsSDK{
-			LoggingClient: lc,
+			lc: lc,
 		},
 	}
 
@@ -256,7 +256,7 @@ func TestHTTPExport(t *testing.T) {
 func TestSetOutputData(t *testing.T) {
 	configurable := AppFunctionsSDKConfigurable{
 		Sdk: &AppFunctionsSDK{
-			LoggingClient: lc,
+			lc: lc,
 		},
 	}
 
@@ -272,11 +272,11 @@ func TestSetOutputData(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			trx := configurable.SetOutputData(tt.params)
+			trx := configurable.SetResponseData(tt.params)
 			if tt.expectNil {
-				assert.Nil(t, trx, "return result from SetOutputData should be nil")
+				assert.Nil(t, trx, "return result from SetResponseData should be nil")
 			} else {
-				assert.NotNil(t, trx, "return result from SetOutputData should not be nil")
+				assert.NotNil(t, trx, "return result from SetResponseData should not be nil")
 			}
 		})
 	}
@@ -285,7 +285,7 @@ func TestSetOutputData(t *testing.T) {
 func TestBatchByCount(t *testing.T) {
 	configurable := AppFunctionsSDKConfigurable{
 		Sdk: &AppFunctionsSDK{
-			LoggingClient: lc,
+			lc: lc,
 		},
 	}
 
@@ -299,7 +299,7 @@ func TestBatchByCount(t *testing.T) {
 func TestBatchByTime(t *testing.T) {
 	configurable := AppFunctionsSDKConfigurable{
 		Sdk: &AppFunctionsSDK{
-			LoggingClient: lc,
+			lc: lc,
 		},
 	}
 
@@ -313,7 +313,7 @@ func TestBatchByTime(t *testing.T) {
 func TestBatchByTimeAndCount(t *testing.T) {
 	configurable := AppFunctionsSDKConfigurable{
 		Sdk: &AppFunctionsSDK{
-			LoggingClient: lc,
+			lc: lc,
 		},
 	}
 
@@ -332,7 +332,7 @@ func TestJSONLogic(t *testing.T) {
 
 	configurable := AppFunctionsSDKConfigurable{
 		Sdk: &AppFunctionsSDK{
-			LoggingClient: lc,
+			lc: lc,
 		},
 	}
 	trx := configurable.JSONLogic(params)
@@ -343,7 +343,7 @@ func TestJSONLogic(t *testing.T) {
 func TestMQTTExport(t *testing.T) {
 	configurable := AppFunctionsSDKConfigurable{
 		Sdk: &AppFunctionsSDK{
-			LoggingClient: lc,
+			lc: lc,
 		},
 	}
 
@@ -366,7 +366,7 @@ func TestMQTTExport(t *testing.T) {
 func TestAddTags(t *testing.T) {
 	configurable := AppFunctionsSDKConfigurable{
 		Sdk: &AppFunctionsSDK{
-			LoggingClient: lc,
+			lc: lc,
 		},
 	}
 
@@ -399,7 +399,7 @@ func TestAddTags(t *testing.T) {
 func TestEncrypt(t *testing.T) {
 	configurable := AppFunctionsSDKConfigurable{
 		Sdk: &AppFunctionsSDK{
-			LoggingClient: lc,
+			lc: lc,
 		},
 	}
 

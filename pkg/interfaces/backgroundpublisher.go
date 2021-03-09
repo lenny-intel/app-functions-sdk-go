@@ -1,4 +1,5 @@
 //
+// Copyright (c) 2020 Technotects
 // Copyright (c) 2021 Intel Corporation
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,22 +15,11 @@
 // limitations under the License.
 //
 
-package internal
+package interfaces
 
-import (
-	contracts "github.com/edgexfoundry/go-mod-core-contracts/v2/v2"
-)
-
-const (
-	ConfigRegistryStem   = "edgex/appservices/1.0/"
-	CorrelationHeaderKey = "X-Correlation-ID"
-
-	ApiTriggerRoute   = contracts.ApiBase + "/trigger"
-	ApiAddSecretRoute = contracts.ApiBase + "/secret"
-)
-
-// SDKVersion indicates the version of the SDK - will be overwritten by build
-var SDKVersion = "0.0.0"
-
-// ApplicationVersion indicates the version of the application itself, not the SDK - will be overwritten by build
-var ApplicationVersion = "0.0.0"
+// BackgroundPublisher provides an interface to send messages from background processes
+// through the service's configured MessageBus output
+type BackgroundPublisher interface {
+	// Publish provided message through the configured MessageBus output
+	Publish(payload []byte, correlationID string, contentType string)
+}

@@ -1,5 +1,6 @@
 //
 // Copyright (c) 2020 Technotects
+// Copyright (c) 2021 Intel Corporation
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,14 +17,11 @@
 
 package appsdk
 
-import "github.com/edgexfoundry/go-mod-messaging/v2/pkg/types"
+import (
+	"github.com/edgexfoundry/go-mod-messaging/v2/pkg/types"
 
-// BackgroundPublisher provides an interface to send messages from background processes
-// through the service's configured MessageBus output
-type BackgroundPublisher interface {
-	// Publish provided message through the configured MessageBus output
-	Publish(payload []byte, correlationID string, contentType string)
-}
+	"github.com/edgexfoundry/app-functions-sdk-go/v2/pkg/interfaces"
+)
 
 type backgroundPublisher struct {
 	output chan<- types.MessageEnvelope
@@ -40,7 +38,7 @@ func (pub *backgroundPublisher) Publish(payload []byte, correlationID string, co
 	pub.output <- outputEnvelope
 }
 
-func newBackgroundPublisher(capacity int) (<-chan types.MessageEnvelope, BackgroundPublisher) {
+func newBackgroundPublisher(capacity int) (<-chan types.MessageEnvelope, interfaces.BackgroundPublisher) {
 	backgroundChannel := make(chan types.MessageEnvelope, capacity)
 	return backgroundChannel, &backgroundPublisher{output: backgroundChannel}
 }

@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2020 Intel Corporation
+// Copyright (c) 2021 Intel Corporation
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,19 +14,24 @@
 // limitations under the License.
 //
 
-package appsdk
+package interfaces
 
 import (
 	"context"
 	"sync"
 
-	"github.com/edgexfoundry/app-functions-sdk-go/v2/appcontext"
-	"github.com/edgexfoundry/app-functions-sdk-go/v2/internal/common"
-
 	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap"
 	"github.com/edgexfoundry/go-mod-core-contracts/v2/clients/logger"
 	"github.com/edgexfoundry/go-mod-messaging/v2/pkg/types"
 )
+
+// TriggerConfig provides a container to pass context needed to user defined triggers
+type TriggerConfig struct {
+	Config           types.MessageBusConfig
+	Logger           logger.LoggingClient
+	ContextBuilder   TriggerContextBuilder
+	MessageProcessor TriggerMessageProcessor
+}
 
 // Trigger interface provides an abstract means to pass messages through the function pipeline
 type Trigger interface {
@@ -35,15 +40,7 @@ type Trigger interface {
 }
 
 // TriggerMessageProcessor provides an interface that can be used by custom triggers to invoke the runtime
-type TriggerMessageProcessor func(ctx *appcontext.Context, envelope types.MessageEnvelope) error
+type TriggerMessageProcessor func(ctx AppFunctionContext, envelope types.MessageEnvelope) error
 
 // TriggerContextBuilder provides an interface to construct an appcontext.Context for message
-type TriggerContextBuilder func(env types.MessageEnvelope) *appcontext.Context
-
-// TriggerConfig provides a container to pass context needed to user defined triggers
-type TriggerConfig struct {
-	Config           *common.ConfigurationStruct
-	Logger           logger.LoggingClient
-	ContextBuilder   TriggerContextBuilder
-	MessageProcessor TriggerMessageProcessor
-}
+type TriggerContextBuilder func(env types.MessageEnvelope) AppFunctionContext
